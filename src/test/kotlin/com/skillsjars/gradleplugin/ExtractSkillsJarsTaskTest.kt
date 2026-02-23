@@ -95,6 +95,62 @@ class ExtractSkillsJarsTaskTest {
     }
 
     @Test
+    fun `extract skillsjars with new path`() {
+        setupLocalRepo("test-skill", skillsPrefix = "META-INF/skills/")
+        writeSettingsFile()
+        writeBuildFile(
+            dependencies = """implementation("com.skillsjars:test-skill:1.0.0")"""
+        )
+
+        val outputDir = File(projectDir, "output")
+
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("extractSkillsJars", "-Pdir=${outputDir.absolutePath}")
+            .withPluginClasspath()
+            .build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":extractSkillsJars")?.outcome)
+
+        val skillMd = File(outputDir, "skillsjars__org__repo__skill/SKILL.md")
+        assertTrue(skillMd.exists(), "SKILL.md should exist")
+
+        val testFile = File(outputDir, "skillsjars__org__repo__skill/test.txt")
+        assertTrue(testFile.exists(), "test.txt should exist")
+        assertEquals("test content", testFile.readText())
+
+        val nestedFile = File(outputDir, "skillsjars__org__repo__skill/foo/nested.txt")
+        assertTrue(nestedFile.exists(), "Nested file should exist")
+        assertEquals("nested content", nestedFile.readText())
+    }
+
+    @Test
+    fun `extract skillsjars with relative dir`() {
+        setupLocalRepo("test-skill")
+        writeSettingsFile()
+        writeBuildFile(
+            dependencies = """implementation("com.skillsjars:test-skill:1.0.0")"""
+        )
+
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("extractSkillsJars", "-Pdir=output")
+            .withPluginClasspath()
+            .build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":extractSkillsJars")?.outcome)
+
+        val outputDir = File(projectDir, "output")
+
+        val skillMd = File(outputDir, "skillsjars__org__repo__skill/SKILL.md")
+        assertTrue(skillMd.exists(), "SKILL.md should exist")
+
+        val testFile = File(outputDir, "skillsjars__org__repo__skill/test.txt")
+        assertTrue(testFile.exists(), "test.txt should exist")
+        assertEquals("test content", testFile.readText())
+    }
+
+    @Test
     fun `non-skillsjars dependencies are ignored`() {
         setupLocalRepo("test-skill")
         setupLocalRepo("other-lib", group = "com.example")
@@ -141,12 +197,12 @@ class ExtractSkillsJarsTaskTest {
         )
     }
 
-    private fun setupLocalRepo(artifactId: String, group: String = "com.skillsjars") {
+    private fun setupLocalRepo(artifactId: String, group: String = "com.skillsjars", skillsPrefix: String = "META-INF/resources/skills/") {
         val groupPath = group.replace(".", "/")
         val artifactDir = File(projectDir, "repo/$groupPath/$artifactId/1.0.0")
         artifactDir.mkdirs()
 
-        createTestSkillsJar(File(artifactDir, "$artifactId-1.0.0.jar"))
+        createTestSkillsJar(File(artifactDir, "$artifactId-1.0.0.jar"), skillsPrefix)
 
         File(artifactDir, "$artifactId-1.0.0.pom").writeText(
             """
@@ -161,20 +217,20 @@ class ExtractSkillsJarsTaskTest {
         )
     }
 
-    private fun createTestSkillsJar(file: File) {
+    private fun createTestSkillsJar(file: File, skillsPrefix: String = "META-INF/resources/skills/") {
         JarOutputStream(FileOutputStream(file)).use { jos ->
             // Add SKILL.md marker
-            jos.putNextEntry(JarEntry("META-INF/resources/skills/org/repo/skill/SKILL.md"))
+            jos.putNextEntry(JarEntry("${skillsPrefix}org/repo/skill/SKILL.md"))
             jos.write("# Test Skill".toByteArray())
             jos.closeEntry()
 
             // Add file at root of skill
-            jos.putNextEntry(JarEntry("META-INF/resources/skills/org/repo/skill/test.txt"))
+            jos.putNextEntry(JarEntry("${skillsPrefix}org/repo/skill/test.txt"))
             jos.write("test content".toByteArray())
             jos.closeEntry()
 
             // Add nested file
-            jos.putNextEntry(JarEntry("META-INF/resources/skills/org/repo/skill/foo/nested.txt"))
+            jos.putNextEntry(JarEntry("${skillsPrefix}org/repo/skill/foo/nested.txt"))
             jos.write("nested content".toByteArray())
             jos.closeEntry()
         }

@@ -11,5 +11,9 @@ export ORG_GRADLE_PROJECT_signingInMemoryKeyPassword=some_password
 ```
 
 ```
+git commit -am "Release vX.Y.Z"
+git tag vX.Y.Z -m "Release vX.Y.Z"
+git push 
+
 ./gradlew publishAndReleaseToMavenCentral
 ```

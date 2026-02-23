@@ -18,7 +18,7 @@ abstract class ExtractSkillsJarsTask : DefaultTask() {
 
     companion object {
         const val SKILLSJARS_GROUP = "com.skillsjars"
-        const val SKILLS_PREFIX = "META-INF/resources/skills/"
+        val SKILLS_PREFIXES = listOf("META-INF/skills/", "META-INF/resources/skills/")
     }
 
     @get:Input
@@ -38,9 +38,9 @@ abstract class ExtractSkillsJarsTask : DefaultTask() {
             throw GradleException("The 'dir' parameter is required. Use -Pdir=<path>")
         }
 
-        val outputPath = File(dir.get()).toPath()
+        val outputPath = project.file(dir.get()).toPath()
 
-        logger.lifecycle("Extracting SkillsJars to: ${dir.get()}")
+        logger.lifecycle("Extracting SkillsJars to: $outputPath")
 
         deleteDirectory(outputPath)
         Files.createDirectories(outputPath)
@@ -105,8 +105,8 @@ abstract class ExtractSkillsJarsTask : DefaultTask() {
                 val entry = entries.nextElement()
                 val entryName = entry.name
 
-                if (entryName.startsWith(SKILLS_PREFIX) && entryName.endsWith("/SKILL.md")) {
-                    val relativePath = entryName.substring(SKILLS_PREFIX.length)
+                val relativePath = stripSkillsPrefix(entryName) ?: continue
+                if (entryName.endsWith("/SKILL.md")) {
                     val skillRoot = relativePath.substring(0, relativePath.length - "/SKILL.md".length)
                     val flattenedRoot = skillRoot.replace("/", "__")
                     skillRoots["$skillRoot/"] = flattenedRoot
@@ -121,9 +121,8 @@ abstract class ExtractSkillsJarsTask : DefaultTask() {
                 val entry = entries.nextElement()
                 val entryName = entry.name
 
-                if (!entryName.startsWith(SKILLS_PREFIX) || entry.isDirectory) continue
-
-                val relativePath = entryName.substring(SKILLS_PREFIX.length)
+                if (entry.isDirectory) continue
+                val relativePath = stripSkillsPrefix(entryName) ?: continue
 
                 // Find the skill root for this file
                 val rootEntry = skillRoots.entries.firstOrNull { relativePath.startsWith(it.key) }
@@ -154,6 +153,15 @@ abstract class ExtractSkillsJarsTask : DefaultTask() {
                 logger.debug("Extracted: $conflictKey")
             }
         }
+    }
+
+    private fun stripSkillsPrefix(entryName: String): String? {
+        for (prefix in SKILLS_PREFIXES) {
+            if (entryName.startsWith(prefix)) {
+                return entryName.substring(prefix.length)
+            }
+        }
+        return null
     }
 
     private fun deleteDirectory(path: Path) {

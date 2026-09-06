@@ -12,7 +12,7 @@ plugins {
 }
 
 group = "com.skillsjars"
-version = "0.0.2"
+version = "0.1.0"
 
 gradlePlugin {
     website = "https://github.com/skillsjars/skillsjars-gradle-plugin"

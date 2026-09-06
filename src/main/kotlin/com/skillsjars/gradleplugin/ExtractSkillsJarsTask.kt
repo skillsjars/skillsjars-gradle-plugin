@@ -2,31 +2,33 @@ package com.skillsjars.gradleplugin
 
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
-import org.gradle.api.provider.ListProperty
-import org.gradle.api.provider.Property
-import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.Optional
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.TaskAction
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.util.Comparator
 import java.util.jar.JarFile
-import kotlin.collections.iterator
 
+/**
+ * Task that extracts SkillsJar artifacts from the `skill` configuration into a specified target directory.
+ *
+ * It scans all resolved dependencies in the `skill` configuration for skill content located under
+ * `META-INF/skills/` or `META-INF/resources/skills/`, flattens the skill roots into `skillsjars__<root>`,
+ * clears the target directory before extraction, and checks for path collisions between dependencies.
+ */
 abstract class ExtractSkillsJarsTask : DefaultTask() {
 
     companion object {
-        const val SKILLSJARS_GROUP = "com.skillsjars"
+        const val SKILL_CONFIGURATION_NAME = "skill"
         val SKILLS_PREFIXES = listOf("META-INF/skills/", "META-INF/resources/skills/")
     }
 
-    @get:Input
-    abstract val dir: Property<String>
-
-    @get:Input
-    @get:Optional
-    abstract val configurations: ListProperty<String>
+    @get:Internal
+    abstract val outputDir: DirectoryProperty
 
     init {
         outputs.upToDateWhen { false }
@@ -34,11 +36,7 @@ abstract class ExtractSkillsJarsTask : DefaultTask() {
 
     @TaskAction
     fun extract() {
-        if (!dir.isPresent || dir.get().isBlank()) {
-            throw GradleException("The 'dir' parameter is required. Use -Pdir=<path>")
-        }
-
-        val outputPath = project.file(dir.get()).toPath()
+        val outputPath = resolveOutputPath()
 
         logger.lifecycle("Extracting SkillsJars to: $outputPath")
 
@@ -57,25 +55,37 @@ abstract class ExtractSkillsJarsTask : DefaultTask() {
         logger.lifecycle("Successfully extracted SkillsJars")
     }
 
-    private fun findSkillsJars(): Map<String, File> {
-        val result = mutableMapOf<String, File>()
-
-        val configs = if (configurations.isPresent && configurations.get().isNotEmpty()) {
-            configurations.get().mapNotNull { name ->
-                project.configurations.findByName(name)?.takeIf { it.isCanBeResolved }
-            }
-        } else {
-            project.configurations.filter { it.isCanBeResolved }
+    private fun resolveOutputPath(): Path {
+        val cliProp = when {
+            project.hasProperty("outputDir") -> project.property("outputDir") as? String
+            project.hasProperty("dir") -> project.property("dir") as? String
+            else -> null
         }
 
-        for (config in configs) {
+        if (!cliProp.isNullOrBlank()) {
+            return project.file(cliProp).toPath()
+        }
+
+        val configured = outputDir.orNull
+        if (configured != null) {
+            return configured.asFile.toPath()
+        }
+
+        throw GradleException(
+            "An output directory is required. Use -PoutputDir=<path> or set outputDir in the skillsjars extension."
+        )
+    }
+
+    private fun findSkillsJars(): Map<String, File> {
+        val result = mutableMapOf<String, File>()
+        val config = project.configurations.findByName(SKILL_CONFIGURATION_NAME)
+
+        if (config != null && config.isCanBeResolved) {
             try {
-                config.resolvedConfiguration.resolvedArtifacts
-                    .filter { it.moduleVersion.id.group == SKILLSJARS_GROUP }
-                    .forEach { artifact ->
-                        val key = "${artifact.moduleVersion.id}"
-                        result.putIfAbsent(key, artifact.file)
-                    }
+                config.resolvedConfiguration.resolvedArtifacts.forEach { artifact ->
+                    val key = "${artifact.moduleVersion.id}"
+                    result.putIfAbsent(key, artifact.file)
+                }
             } catch (e: Exception) {
                 logger.debug("Could not resolve configuration ${config.name}: ${e.message}")
             }
@@ -147,7 +157,7 @@ abstract class ExtractSkillsJarsTask : DefaultTask() {
 
                 Files.createDirectories(targetPath.parent)
                 jar.getInputStream(entry).use { input ->
-                    Files.copy(input, targetPath)
+                    Files.copy(input, targetPath, StandardCopyOption.REPLACE_EXISTING)
                 }
 
                 logger.debug("Extracted: $conflictKey")
@@ -167,14 +177,14 @@ abstract class ExtractSkillsJarsTask : DefaultTask() {
     private fun deleteDirectory(path: Path) {
         if (!Files.exists(path)) return
 
-        Files.walk(path)
-            .sorted(Comparator.reverseOrder())
-            .forEach { p ->
+        Files.walk(path).use { stream ->
+            stream.sorted(Comparator.reverseOrder()).forEach { p ->
                 try {
-                    Files.delete(p)
+                    Files.deleteIfExists(p)
                 } catch (e: IOException) {
                     logger.warn("Failed to delete: $p")
                 }
             }
+        }
     }
 }

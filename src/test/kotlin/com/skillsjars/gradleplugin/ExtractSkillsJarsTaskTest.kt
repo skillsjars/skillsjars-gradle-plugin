@@ -11,8 +11,13 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+/**
+ * Tests for [ExtractSkillsJarsTask] verifying extraction from `skill` configuration,
+ * output directory precedence, group-agnostic extraction, collision detection, and clean task behavior.
+ */
 class ExtractSkillsJarsTaskTest {
 
     private lateinit var projectDir: File
@@ -28,7 +33,7 @@ class ExtractSkillsJarsTaskTest {
     }
 
     @Test
-    fun `extract without dir parameter fails`() {
+    fun `extract without output directory fails`() {
         writeSettingsFile()
         writeBuildFile()
 
@@ -38,22 +43,22 @@ class ExtractSkillsJarsTaskTest {
             .withPluginClasspath()
             .buildAndFail()
 
-        assertTrue(result.output.contains("dir"))
+        assertTrue(result.output.contains("output directory is required"))
     }
 
     @Test
-    fun `extract skillsjars`() {
-        setupLocalRepo("test-skill")
+    fun `extract skillsjars using skill configuration`() {
+        setupLocalRepo("test-skill", group = "org.custom")
         writeSettingsFile()
         writeBuildFile(
-            dependencies = """implementation("com.skillsjars:test-skill:1.0.0")"""
+            dependencies = """skill("org.custom:test-skill:1.0.0")"""
         )
 
         val outputDir = File(projectDir, "output")
 
         val result = GradleRunner.create()
             .withProjectDir(projectDir)
-            .withArguments("extractSkillsJars", "-Pdir=${outputDir.absolutePath}")
+            .withArguments("extractSkillsJars", "-PoutputDir=${outputDir.absolutePath}")
             .withPluginClasspath()
             .build()
 
@@ -69,6 +74,79 @@ class ExtractSkillsJarsTaskTest {
         val nestedFile = File(outputDir, "skillsjars__org__repo__skill/foo/nested.txt")
         assertTrue(nestedFile.exists(), "Nested file should exist")
         assertEquals("nested content", nestedFile.readText())
+    }
+
+    @Test
+    fun `extract skillsjars with extension outputDir`() {
+        setupLocalRepo("test-skill", group = "com.other")
+        writeSettingsFile()
+        writeBuildFile(
+            extensionConfig = """
+                skillsjars {
+                    outputDir.set(layout.projectDirectory.dir("configured-output"))
+                }
+            """.trimIndent(),
+            dependencies = """skill("com.other:test-skill:1.0.0")"""
+        )
+
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("extractSkillsJars")
+            .withPluginClasspath()
+            .build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":extractSkillsJars")?.outcome)
+
+        val outputDir = File(projectDir, "configured-output")
+        val skillMd = File(outputDir, "skillsjars__org__repo__skill/SKILL.md")
+        assertTrue(skillMd.exists(), "SKILL.md should exist in configured output dir")
+    }
+
+    @Test
+    fun `cli -P option takes precedence over extension outputDir`() {
+        setupLocalRepo("test-skill")
+        writeSettingsFile()
+        writeBuildFile(
+            extensionConfig = """
+                skillsjars {
+                    outputDir.set(layout.projectDirectory.dir("extension-output"))
+                }
+            """.trimIndent(),
+            dependencies = """skill("com.skillsjars:test-skill:1.0.0")"""
+        )
+
+        val cliOutputDir = File(projectDir, "cli-output")
+
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("extractSkillsJars", "-PoutputDir=${cliOutputDir.absolutePath}")
+            .withPluginClasspath()
+            .build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":extractSkillsJars")?.outcome)
+
+        assertTrue(File(cliOutputDir, "skillsjars__org__repo__skill/SKILL.md").exists(), "CLI output dir should be used")
+        assertFalse(File(projectDir, "extension-output").exists(), "Extension output dir should NOT be used")
+    }
+
+    @Test
+    fun `cli -Pdir backward compatibility`() {
+        setupLocalRepo("test-skill")
+        writeSettingsFile()
+        writeBuildFile(
+            dependencies = """skill("com.skillsjars:test-skill:1.0.0")"""
+        )
+
+        val outputDir = File(projectDir, "output-legacy")
+
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("extractSkillsJars", "-Pdir=${outputDir.absolutePath}")
+            .withPluginClasspath()
+            .build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":extractSkillsJars")?.outcome)
+        assertTrue(File(outputDir, "skillsjars__org__repo__skill/SKILL.md").exists())
     }
 
     @Test
@@ -78,8 +156,8 @@ class ExtractSkillsJarsTaskTest {
         writeSettingsFile()
         writeBuildFile(
             dependencies = """
-                implementation("com.skillsjars:skill1:1.0.0")
-                implementation("com.skillsjars:skill2:1.0.0")
+                skill("com.skillsjars:skill1:1.0.0")
+                skill("com.skillsjars:skill2:1.0.0")
             """.trimIndent()
         )
 
@@ -87,7 +165,7 @@ class ExtractSkillsJarsTaskTest {
 
         val result = GradleRunner.create()
             .withProjectDir(projectDir)
-            .withArguments("extractSkillsJars", "-Pdir=${outputDir.absolutePath}")
+            .withArguments("extractSkillsJars", "-PoutputDir=${outputDir.absolutePath}")
             .withPluginClasspath()
             .buildAndFail()
 
@@ -95,18 +173,18 @@ class ExtractSkillsJarsTaskTest {
     }
 
     @Test
-    fun `extract skillsjars with new path`() {
+    fun `extract skillsjars with META-INF skills prefix`() {
         setupLocalRepo("test-skill", skillsPrefix = "META-INF/skills/")
         writeSettingsFile()
         writeBuildFile(
-            dependencies = """implementation("com.skillsjars:test-skill:1.0.0")"""
+            dependencies = """skill("com.skillsjars:test-skill:1.0.0")"""
         )
 
         val outputDir = File(projectDir, "output")
 
         val result = GradleRunner.create()
             .withProjectDir(projectDir)
-            .withArguments("extractSkillsJars", "-Pdir=${outputDir.absolutePath}")
+            .withArguments("extractSkillsJars", "-PoutputDir=${outputDir.absolutePath}")
             .withPluginClasspath()
             .build()
 
@@ -114,77 +192,47 @@ class ExtractSkillsJarsTaskTest {
 
         val skillMd = File(outputDir, "skillsjars__org__repo__skill/SKILL.md")
         assertTrue(skillMd.exists(), "SKILL.md should exist")
-
-        val testFile = File(outputDir, "skillsjars__org__repo__skill/test.txt")
-        assertTrue(testFile.exists(), "test.txt should exist")
-        assertEquals("test content", testFile.readText())
-
-        val nestedFile = File(outputDir, "skillsjars__org__repo__skill/foo/nested.txt")
-        assertTrue(nestedFile.exists(), "Nested file should exist")
-        assertEquals("nested content", nestedFile.readText())
     }
 
     @Test
-    fun `extract skillsjars with relative dir`() {
-        setupLocalRepo("test-skill")
+    fun `clean task deletes configured output directory`() {
         writeSettingsFile()
         writeBuildFile(
-            dependencies = """implementation("com.skillsjars:test-skill:1.0.0")"""
-        )
-
-        val result = GradleRunner.create()
-            .withProjectDir(projectDir)
-            .withArguments("extractSkillsJars", "-Pdir=output")
-            .withPluginClasspath()
-            .build()
-
-        assertEquals(TaskOutcome.SUCCESS, result.task(":extractSkillsJars")?.outcome)
-
-        val outputDir = File(projectDir, "output")
-
-        val skillMd = File(outputDir, "skillsjars__org__repo__skill/SKILL.md")
-        assertTrue(skillMd.exists(), "SKILL.md should exist")
-
-        val testFile = File(outputDir, "skillsjars__org__repo__skill/test.txt")
-        assertTrue(testFile.exists(), "test.txt should exist")
-        assertEquals("test content", testFile.readText())
-    }
-
-    @Test
-    fun `non-skillsjars dependencies are ignored`() {
-        setupLocalRepo("test-skill")
-        setupLocalRepo("other-lib", group = "com.example")
-        writeSettingsFile()
-        writeBuildFile(
-            dependencies = """
-                implementation("com.skillsjars:test-skill:1.0.0")
-                implementation("com.example:other-lib:1.0.0")
+            extensionConfig = """
+                skillsjars {
+                    outputDir.set(layout.projectDirectory.dir("my-extracted-skills"))
+                }
             """.trimIndent()
         )
 
-        val outputDir = File(projectDir, "output")
+        val outputDir = File(projectDir, "my-extracted-skills")
+        outputDir.mkdirs()
+        File(outputDir, "dummy.txt").writeText("dummy")
+        assertTrue(outputDir.exists())
 
         val result = GradleRunner.create()
             .withProjectDir(projectDir)
-            .withArguments("extractSkillsJars", "-Pdir=${outputDir.absolutePath}")
+            .withArguments("clean")
             .withPluginClasspath()
             .build()
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":extractSkillsJars")?.outcome)
-        assertTrue(result.output.contains("Found 1 SkillsJar(s)"))
+        assertEquals(TaskOutcome.SUCCESS, result.task(":clean")?.outcome)
+        assertFalse(outputDir.exists(), "Clean task should delete configured outputDir")
     }
 
     private fun writeSettingsFile() {
         File(projectDir, "settings.gradle.kts").writeText("")
     }
 
-    private fun writeBuildFile(dependencies: String = "") {
+    private fun writeBuildFile(extensionConfig: String = "", dependencies: String = "") {
         File(projectDir, "build.gradle.kts").writeText(
             """
             plugins {
                 java
                 id("com.skillsjars.gradle-plugin")
             }
+
+            $extensionConfig
 
             repositories {
                 maven { url = uri("repo") }

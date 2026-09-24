@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yaml
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v6
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Publish and release to Maven Central
+      env:
+        PGP_SECRET: ${{ secrets.PGP_SECRET }}
+        ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.PGP_PASSPHRASE }}
+        ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
+        ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.SONATYPE_PASSWORD }}
+      run: |
+        set -euo pipefail
+
+        if [[ "$PGP_SECRET" == *"-----BEGIN PGP PRIVATE KEY BLOCK-----"* ]]; then
+          signing_key="$PGP_SECRET"
+        else
+          if ! signing_key="$(printf '%s' "$PGP_SECRET" | base64 --decode)"; then
+            echo "PGP_SECRET is neither an ASCII-armored private key nor valid base64." >&2
+            exit 1
+          fi
+        fi
+
+        if [[ "$signing_key" != *"-----BEGIN PGP PRIVATE KEY BLOCK-----"* ||
+              "$signing_key" != *"-----END PGP PRIVATE KEY BLOCK-----"* ]]; then
+          echo "PGP_SECRET must be, or base64-decode to, an ASCII-armored PGP private key." >&2
+          exit 1
+        fi
+
+        export ORG_GRADLE_PROJECT_signingInMemoryKey="$signing_key"
+        unset PGP_SECRET signing_key
+
+        ./gradlew publishAndReleaseToMavenCentral

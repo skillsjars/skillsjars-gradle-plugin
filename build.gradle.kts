@@ -8,11 +8,14 @@ plugins {
     embeddedKotlin("plugin.power-assert")
     embeddedKotlin("plugin.serialization")
 
+    id("com.palantir.git-version") version "5.0.0"
     id("com.vanniktech.maven.publish") version "0.37.0"
 }
 
 group = "com.skillsjars"
-version = "0.1.0"
+@Suppress("UNCHECKED_CAST")
+val gitVersion = extra["gitVersion"] as groovy.lang.Closure<String>
+version = gitVersion().removePrefix("v")
 
 gradlePlugin {
     website = "https://github.com/skillsjars/skillsjars-gradle-plugin"

@@ -5,12 +5,14 @@ import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.MapProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.IgnoreEmptyDirectories
 import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputDirectory
+import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.SkipWhenEmpty
 import org.gradle.api.tasks.TaskAction
 import java.io.File
 import java.io.IOException
@@ -36,7 +38,9 @@ abstract class PackageSkillsJarsTask : DefaultTask() {
         private val GITHUB_URL_PATTERN = Pattern.compile(""".*github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$""")
     }
 
-    @get:InputDirectory
+    @get:InputFiles
+    @get:SkipWhenEmpty
+    @get:IgnoreEmptyDirectories
     @get:PathSensitive(PathSensitivity.RELATIVE)
     @get:Optional
     abstract val sourceDir: DirectoryProperty

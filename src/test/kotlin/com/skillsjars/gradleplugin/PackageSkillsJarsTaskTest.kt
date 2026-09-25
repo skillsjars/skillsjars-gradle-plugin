@@ -239,6 +239,79 @@ class PackageSkillsJarsTaskTest {
         assertTrue(entryNames.contains("META-INF/skills/testorg/testrepo/helper-skill/prompts/system.txt"), "Jar should contain prompt file")
     }
 
+    @Test
+    fun `jar builds when the project has no skills directory`() {
+        writeSettingsFile()
+        writeBuildFile(group = "com.example.test")
+
+        val srcJava = File(projectDir, "src/main/java/example")
+        srcJava.mkdirs()
+        File(srcJava, "Greeter.java").writeText(
+            """
+            package example;
+            public class Greeter {
+                public String greet() { return "Hello"; }
+            }
+            """.trimIndent()
+        )
+
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("jar")
+            .withPluginClasspath()
+            .build()
+
+        assertEquals(TaskOutcome.NO_SOURCE, result.task(":packageSkillsJars")?.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":jar")?.outcome)
+
+        val jarFile = File(projectDir, "build/libs").listFiles { f -> f.name.endsWith(".jar") }?.firstOrNull()
+        assertTrue(jarFile != null && jarFile.exists(), "JAR file should be created")
+
+        val entryNames = mutableSetOf<String>()
+        JarFile(jarFile).use { jar ->
+            val entries = jar.entries()
+            while (entries.hasMoreElements()) {
+                entryNames.add(entries.nextElement().name)
+            }
+        }
+
+        assertTrue(entryNames.contains("example/Greeter.class"), "Jar should contain Greeter.class")
+        assertTrue(entryNames.none { it.startsWith("META-INF/skills/") }, "Jar should contain no skills")
+    }
+
+    @Test
+    fun `removing the skills directory removes the skills packaged before`() {
+        writeSettingsFile()
+        writeBuildFile(
+            extensionConfig = """
+                skillsjars {
+                    gitHubUrl.set("https://github.com/testorg/testrepo")
+                }
+            """.trimIndent()
+        )
+
+        createLocalSkill(skillDirName = "my-skill", skillMdContent = "# My Skill")
+
+        GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("packageSkillsJars")
+            .withPluginClasspath()
+            .build()
+
+        val packagedSkill = File(projectDir, "build/generated/resources/skillsjars/META-INF/skills/testorg/testrepo/my-skill/SKILL.md")
+        assertTrue(packagedSkill.exists(), "my-skill SKILL.md should be packaged")
+
+        File(projectDir, "skills").deleteRecursively()
+
+        GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("packageSkillsJars")
+            .withPluginClasspath()
+            .build()
+
+        assertFalse(packagedSkill.exists(), "Skills removed from the project should no longer be packaged")
+    }
+
     private fun writeSettingsFile() {
         File(projectDir, "settings.gradle.kts").writeText("rootProject.name = \"test-package-project\"")
     }

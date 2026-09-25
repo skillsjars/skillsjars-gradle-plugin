@@ -108,4 +108,4 @@ Run packaging:
 ./gradlew packageSkillsJars
 ```
 
-When the `java` plugin is applied, `packageSkillsJars` is automatically wired into your `processResources` and `jar` tasks so skills are packaged directly into `META-INF/skills/...` in your project's JAR.
+When the `java` plugin is applied, `packageSkillsJars` is automatically wired into your `processResources` and `jar` tasks so skills are packaged directly into `META-INF/skills/...` in your project's JAR. A project without a `skills/` directory, such as one that only extracts skills, has nothing to package, and `packageSkillsJars` is skipped.

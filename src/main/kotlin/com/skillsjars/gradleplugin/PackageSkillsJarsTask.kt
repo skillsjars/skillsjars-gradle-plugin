@@ -5,15 +5,18 @@ import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.MapProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.IgnoreEmptyDirectories
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.SkipWhenEmpty
 import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
 import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
@@ -31,6 +34,7 @@ import java.util.regex.Pattern
  * and copies the skills into [outputDir] structured by GitHub coordinates (e.g. `META-INF/skills/<org>/<repo>/...`)
  * or group path fallback (e.g. `META-INF/skills/<groupPath>/...`).
  */
+@DisableCachingByDefault(because = "Not worth caching")
 abstract class PackageSkillsJarsTask : DefaultTask() {
 
     companion object {
@@ -45,9 +49,21 @@ abstract class PackageSkillsJarsTask : DefaultTask() {
     @get:Optional
     abstract val sourceDir: DirectoryProperty
 
-    @get:Input
-    @get:Optional
+    /**
+     * The group whose path the skills are packaged under when no [gitHubUrl] is set. Defaults to the project group,
+     * also when it is set to a provider without a value.
+     */
+    @get:Internal
     abstract val projectGroup: Property<String>
+
+    private val defaultProjectGroup: Provider<String> = project.provider { project.group.toString() }
+
+    /**
+     * The group the skills are packaged under when no [gitHubUrl] is set: [projectGroup], or the project group.
+     */
+    @get:Input
+    val packageGroup: Provider<String>
+        get() = projectGroup.orElse(defaultProjectGroup)
 
     @get:Input
     @get:Optional
@@ -112,7 +128,7 @@ abstract class PackageSkillsJarsTask : DefaultTask() {
             }
         }
 
-        val group = projectGroup.orNull ?: project.group.toString()
+        val group = packageGroup.get()
         val groupPath = group.replace('.', '/')
         return "META-INF/skills/$groupPath"
     }

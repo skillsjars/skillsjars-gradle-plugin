@@ -14,7 +14,8 @@ import kotlin.test.assertTrue
 
 /**
  * Tests for [PackageSkillsJarsTask] verifying packaging with GitHub coordinates, group path fallback,
- * `allowed-tools` frontmatter validation, directory filtering, and integration with `jar` creation.
+ * `allowed-tools` frontmatter validation, directory filtering, integration with `jar` creation,
+ * and reuse of configuration cache entries.
  */
 class PackageSkillsJarsTaskTest {
 
@@ -23,6 +24,7 @@ class PackageSkillsJarsTaskTest {
     @BeforeTest
     fun setUp() {
         projectDir = createTempDirectory("skillsjars-package-test").toFile()
+        enableConfigurationCache(projectDir)
     }
 
     @AfterTest
@@ -303,13 +305,157 @@ class PackageSkillsJarsTaskTest {
 
         File(projectDir, "skills").deleteRecursively()
 
-        GradleRunner.create()
+        val result = GradleRunner.create()
             .withProjectDir(projectDir)
             .withArguments("packageSkillsJars")
             .withPluginClasspath()
             .build()
 
+        assertTrue(result.output.contains(CONFIGURATION_CACHE_REUSED), "Second run should reuse the configuration cache entry")
         assertFalse(packagedSkill.exists(), "Skills removed from the project should no longer be packaged")
+    }
+
+    @Test
+    fun `package skills reuses the configuration cache entry`() {
+        writeSettingsFile()
+        writeBuildFile(group = "com.example.test")
+
+        createLocalSkill(
+            skillDirName = "my-skill",
+            skillMdContent = "# My Skill",
+            extraFiles = mapOf("data.txt" to "sample data")
+        )
+
+        val runner = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("packageSkillsJars")
+            .withPluginClasspath()
+
+        val first = runner.build()
+        assertTrue(first.output.contains(CONFIGURATION_CACHE_STORED), "First run should store a configuration cache entry")
+
+        createLocalSkill(
+            skillDirName = "my-skill",
+            skillMdContent = "# My Skill",
+            extraFiles = mapOf("data.txt" to "changed data")
+        )
+        createLocalSkill(skillDirName = "other-skill", skillMdContent = "# Other Skill")
+
+        val second = runner.build()
+
+        assertTrue(second.output.contains(CONFIGURATION_CACHE_REUSED), "Second run should reuse the configuration cache entry")
+        assertEquals(TaskOutcome.SUCCESS, second.task(":packageSkillsJars")?.outcome)
+
+        val packageRoot = File(projectDir, "build/generated/resources/skillsjars/META-INF/skills/com/example/test")
+        assertEquals("changed data", File(packageRoot, "my-skill/data.txt").readText(), "Changed skill should be packaged")
+        assertTrue(File(packageRoot, "other-skill/SKILL.md").exists(), "Added skill should be packaged")
+    }
+
+    @Test
+    fun `packageSkillsJars is skipped without a skills directory when the configuration cache entry is reused`() {
+        writeSettingsFile()
+        writeBuildFile()
+
+        val runner = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("packageSkillsJars")
+            .withPluginClasspath()
+
+        val first = runner.build()
+
+        assertTrue(first.output.contains(CONFIGURATION_CACHE_STORED), "First run should store a configuration cache entry")
+        assertEquals(TaskOutcome.NO_SOURCE, first.task(":packageSkillsJars")?.outcome)
+
+        val second = runner.build()
+
+        assertTrue(second.output.contains(CONFIGURATION_CACHE_REUSED), "Second run should reuse the configuration cache entry")
+        assertEquals(TaskOutcome.NO_SOURCE, second.task(":packageSkillsJars")?.outcome)
+    }
+
+    @Test
+    fun `a package task registered without the plugin packages under the project group`() {
+        writeSettingsFile()
+        File(projectDir, "build.gradle.kts").writeText(
+            """
+            import com.skillsjars.gradleplugin.PackageSkillsJarsTask
+
+            plugins {
+                id("com.skillsjars.gradle-plugin") apply false
+            }
+
+            group = "com.example.registered"
+
+            tasks.register<PackageSkillsJarsTask>("packageMySkills") {
+                sourceDir.set(layout.projectDirectory.dir("skills"))
+                outputDir.set(layout.buildDirectory.dir("my-skills"))
+            }
+            """.trimIndent()
+        )
+        createLocalSkill(skillDirName = "my-skill", skillMdContent = "# My Skill")
+
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("packageMySkills")
+            .withPluginClasspath()
+            .build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":packageMySkills")?.outcome)
+        assertTrue(
+            File(projectDir, "build/my-skills/META-INF/skills/com/example/registered/my-skill/SKILL.md").exists(),
+            "SKILL.md should be placed under the project group path"
+        )
+    }
+
+    @Test
+    fun `a project group set from an absent property falls back to the project group`() {
+        writeSettingsFile()
+        writeBuildFile(
+            group = "com.example.fallback",
+            extensionConfig = """
+                tasks.named<com.skillsjars.gradleplugin.PackageSkillsJarsTask>("packageSkillsJars") {
+                    projectGroup.set(providers.gradleProperty("skillsGroup"))
+                }
+            """.trimIndent()
+        )
+        createLocalSkill(skillDirName = "my-skill", skillMdContent = "# My Skill")
+
+        val outputDir = File(projectDir, "build/generated/resources/skillsjars")
+        val runner = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withPluginClasspath()
+
+        runner.withArguments("packageSkillsJars").build()
+
+        assertTrue(
+            File(outputDir, "META-INF/skills/com/example/fallback/my-skill/SKILL.md").exists(),
+            "SKILL.md should be placed under the project group path"
+        )
+
+        runner.withArguments("packageSkillsJars", "-PskillsGroup=org.other").build()
+
+        assertTrue(
+            File(outputDir, "META-INF/skills/org/other/my-skill/SKILL.md").exists(),
+            "SKILL.md should be placed under the group of the property"
+        )
+    }
+
+    @Test
+    fun `package skills without the configuration cache`() {
+        writeSettingsFile()
+        writeBuildFile(group = "com.example.test")
+        createLocalSkill(skillDirName = "my-skill", skillMdContent = "# My Skill")
+
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withArguments("packageSkillsJars", "--no-configuration-cache")
+            .withPluginClasspath()
+            .build()
+
+        assertFalse(result.output.contains("Configuration cache entry"), "The build should run without the configuration cache")
+        assertEquals(TaskOutcome.SUCCESS, result.task(":packageSkillsJars")?.outcome)
+        assertTrue(
+            File(projectDir, "build/generated/resources/skillsjars/META-INF/skills/com/example/test/my-skill/SKILL.md").exists()
+        )
     }
 
     private fun writeSettingsFile() {

@@ -18,4 +18,4 @@ Follow the `zen-of-projects` Skill; this file records only project-specific fact
 
 ## Exceptions to zen-of-projects
 
-- **No `com.jamesward:skills` dependency:** it is the SkillsJars Gradle plugin itself, and its `example/` build (which uses the local plugin via `includeBuild`) demonstrates third-party Skills. `.factory/MAINTENANCE.md` reads the published Skill from https://start.jamesward.com instead. Don't add the dependency.
+- **No `com.jamesward:skills` dependency:** it is the SkillsJars Gradle plugin itself, and its `example/` build (which uses the local plugin via `includeBuild`) demonstrates third-party Skills. `.factory/MAINTENANCE.md` reads the published Skill from a clone of https://github.com/jamesward/skills instead. Don't add the dependency.
